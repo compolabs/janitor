@@ -21,7 +21,7 @@ in pkgs.stdenv.mkDerivation rec {
   shellHook = ''
     export OPENSSL_DIR="${merged-openssl}"
 
-    export RUST_LOG=info
+    export RUST_LOG=debug
     FILE_LOG_LEVEL="info"
     CONSOLE_LOG_LEVEL="info"
     echo "RUST_LOG is set to $RUST_LOG"
