@@ -6,7 +6,7 @@ use tracing::{error, info, warn};
 use crate::storage::market_storage::TradingEngine;
 use crate::cancel::cancel_processor::CancelProcessor;
 
-const CHECK_INTERVAL: Duration = Duration::from_secs(5);
+const CHECK_INTERVAL: Duration = Duration::from_secs(3);
 const CANCEL_BLOCK_THRESHOLD: i64 = 10;
 
 
