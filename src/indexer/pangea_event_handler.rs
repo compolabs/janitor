@@ -3,7 +3,7 @@ use crate::storage::market_storage::TradingEngine;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct PangeaOrderEvent {
@@ -110,7 +110,7 @@ pub async fn handle_trade_event(
                 }
             }
         } else {
-            warn!("Trade event for order not found in queue: {}", event.order_id);
+            debug!("Trade event for order not found in queue: {}", event.order_id);
         }
     } else {
         warn!("No market queue for symbol: {}", symbol);
@@ -124,7 +124,7 @@ async fn handle_cancel_event(
 ) {
     if let Some(queue) = trading_engine.get_market_queue(&symbol) {
         queue.remove_order(&event.order_id);
-        info!("🚫 MKT order canceled: {}", event.order_id);
+        debug!("🚫 {:?}, order canceled: {}", &symbol, event.order_id);
     }
 }
 
@@ -160,7 +160,7 @@ fn create_new_order_from_event(event: &PangeaOrderEvent) -> Option<SpotOrder> {
             block_number: event.block_number
         })
     } else {
-        warn!("❌ Пропущены данные в событии: {:?}", event);
+        debug!("❌ Пропущены данные в событии: {:?}", event);
         None
     }
 }

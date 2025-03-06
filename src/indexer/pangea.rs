@@ -64,7 +64,7 @@ async fn process_market_orders(
         config.symbol, last_processed_block
     );
 
-    listen_for_new_deltas(client, trading_engine, last_processed_block, contract_h256, config.symbol).await
+    listen_for_new_deltas(trading_engine, last_processed_block, contract_h256, config.symbol).await
 }
 
 async fn create_pangea_client() -> Result<Client<WsProvider>, Error> {
@@ -124,13 +124,28 @@ async fn fetch_historical_data(
 }
 
 async fn listen_for_new_deltas(
-    client: Client<WsProvider>,
     trading_engine: Arc<TradingEngine>,
     mut last_processed_block: i64,
     contract_h256: Address,
     symbol: String,
 ) -> Result<(), Error> {
+    let mut retry_delay = Duration::from_secs(1);
+    let max_backoff = Duration::from_secs(60);
+
     loop {
+        let client = match create_pangea_client().await {
+            Ok(c) => {
+                retry_delay = Duration::from_secs(1);
+                c
+            }
+            Err(e) => {
+                error!("Failed to create Pangea client: {}", e);
+                sleep(retry_delay).await;
+                retry_delay = (retry_delay * 2).min(max_backoff);
+                continue;
+            }
+        };
+
         let request = GetSparkOrderRequest {
             from_block: Bound::Exact(last_processed_block + 1),
             to_block: Bound::Subscribe,
@@ -139,22 +154,47 @@ async fn listen_for_new_deltas(
             ..Default::default()
         };
 
-        match timeout(Duration::from_secs(10), client.get_fuel_spark_orders_by_format(request, Format::JsonStream, true)).await {
-            Ok(Ok(stream)) => {
-                pangea_client::futures::pin_mut!(stream);
-                while let Some(data) = stream.next().await {
-                    if let Ok(data) = data {
-                        if let Ok(order_event) = serde_json::from_slice::<PangeaOrderEvent>(&data) {
-                            last_processed_block = order_event.block_number;
-                            handle_order_event(trading_engine.clone(), order_event, symbol.clone()).await;
+        match timeout(
+            Duration::from_secs(10),
+            client.get_fuel_spark_orders_by_format(request, Format::JsonStream, true),
+        )
+        .await
+        {
+            Ok(Ok(mut stream)) => {
+                info!("Subscribed to real-time deltas from block {}", last_processed_block + 1);
+                
+                retry_delay = Duration::from_secs(1);
+
+                while let Some(item) = stream.next().await {
+                    match item {
+                        Ok(raw_bytes) => {
+                            match serde_json::from_slice::<PangeaOrderEvent>(&raw_bytes) {
+                                Ok(order_event) => {
+                                    last_processed_block = order_event.block_number;
+                                    handle_order_event(
+                                        trading_engine.clone(),
+                                        order_event,
+                                        symbol.clone()
+                                    ).await;
+                                }
+                                Err(e) => {
+                                    error!("Failed to deserialize order event: {}", e);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            error!("Stream error: {}", e);
+                            break;
                         }
                     }
                 }
             }
-            _ => error!("Failed to subscribe to new deltas, retrying..."),
+            _ => {
+                error!("Failed to subscribe to new deltas, retrying...");
+            }
         }
-
-        sleep(Duration::from_secs(5)).await;
+        sleep(retry_delay).await;
+        retry_delay = (retry_delay * 2).min(max_backoff);
     }
 }
 
